@@ -5,6 +5,23 @@ Catat setiap perubahan file di folder `scripts/`. Newest di atas.
 
 ## `TradeOnlyFishIt.lua`
 
+### Fix #8 — `ZIndexBehavior` bukan properti `Frame` (notif tetap gak muncul) + harness-ku sendiri salah
+| | |
+|---|---|
+| **Tanggal** | 2026-11-07 |
+| **File** | `scripts/TradeOnlyFishIt.lua` |
+| **Masalah** | Di Delta: `[FishIt-TradeOnly] Scanning for trade remotes...` muncul, lalu error `ZIndexBehavior is not a valid member of Frame "FishItNotify_..."`, `Line 72 - function notify`, `Line 311 - function setup`. Notifikasi tidak pernah tampil |
+| **Akar** | Baris 72 `frame.ZIndexBehavior = Enum.ZIndexBehavior.Sibling`. `ZIndexBehavior` adalah properti **LayerCollector (`ScreenGui`)**, bukan `Frame`. Crash sebelum `frame.Parent = pg`, jadi frame tak pernah masuk PlayerGui |
+| **Akar sekunder (lebih penting)** | Fix #7 menyatakan "harness 0 masalah" padahal harness **mendaftarkan `ZIndexBehavior` sebagai properti sah `Frame`**. Alat ujinya memberi izin pada bug yang seharusnya ia tangkap — jadi verifikasi Fix #7 tidak valid untuk kelas bug ini |
+| **Perubahan** | |
+| **1** | Hapus baris 72. Frame notifikasi tidak butuh `ZIndexBehavior`; urutan render diamankan oleh `Parent` dan default |
+| **2** | Harness: buang `ZIndexBehavior` dari whitelist `Frame` dan `TextLabel` — hanya tersisa di `ScreenGui`/`LayerCollector` |
+| **3** | Harness: **regression test** — versi Fix #7 dijalankan ulang, kini menghasilkan `Instance.new('Frame').ZIndexBehavior = nil -> PROPERTI TIDAK SAH` (2x). Alat terbukti menangkap bug ini |
+| **4** | Audit seluruh `notify()` (baris 55–110): properti lain (`Size`, `Position`, `BackgroundColor3`, `BorderSizePixel`, `BackgroundTransparency`, `Text*`, `CornerRadius`, `Padding*`, `Parent`, `Destroy`) semuanya valid untuk class masing-masing |
+| **Verifikasi** | `luac5.4 -p` → SYNTAX OK. Harness lama (Fix #7) → 2 error. Harness baru → **0 masalah**, log `3 trade remotes found` + `Trade-only mode: ON` |
+| **Pelajaran** | Stub uji harus lebih ketat dari kode yang diuji, bukan lebih longgar. Whitelist properti yang ditulis manual adalah sumber false-pass — tiap properti baru wajib dicek ke dokumentasi class-nya, bukan ditambahkan begitu saja biar uji hijau. Badge "0 masalah" hanya bermakna sejauh akurasi stub-nya |
+| **Deploy** | Autoexecute + `Delta/Scripts/RobloxDebug/` disinkronkan, md5 dicek sama |
+
 ### Fix #7 — Bug runtime: `Dimension.new`, `+=`, `continue` (ini penyebab "ga on")
 | | |
 |---|---|

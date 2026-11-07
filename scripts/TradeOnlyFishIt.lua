@@ -69,7 +69,6 @@ local function notify(msg, kind)
     frame.BackgroundColor3 = colors[kind] or colors.info
     frame.BorderSizePixel = 0
     frame.Position = UDim2.new(0.5, -170, 0, 44)
-    frame.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 10)
