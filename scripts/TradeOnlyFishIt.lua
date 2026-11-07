@@ -1,13 +1,17 @@
 -- ============================================================
 -- Fish It! Trade-Only (Delta-friendly, dengan notifikasi)
 --
--- Pakai lewat Delta (loadstring dari GitHub raw):
---   loadstring(game:HttpGet("https://raw.githubusercontent.com/<OWNER>/<REPO>/main/TradeOnlyFishIt.lua"))()
+-- Pakai lewat Delta:
+--   local HttpService = game:GetService("HttpService")
+--   local src = HttpService:GetHttpAsset("https://raw.githubusercontent.com/yasgudman/mahal/main/scripts/TradeOnlyFishIt.lua")
+--   loadstring(src)()
+--
+-- (game:HttpGet juga boleh — HttpService:GetHttpAsset lebih Roblox-native)
 --
 -- Setelah di-loadstring:
 --   - Notif "trade-only ON/OFF" muncul di layar tiap toggle
---   - Kalau hook remote gagal, notif jelas bilang "FAILED"
---   - Log juga di console Delta
+--   - Hook remote trade (auto-detect nama yang dipakai server)
+--   - Kalau remote belum ada (trade area belum load), notif jelas
 -- ============================================================
 
 local KONFIG = {
@@ -16,14 +20,21 @@ local KONFIG = {
     AutoAcceptWhitelist = true,
     AutoDeclineNPC = true,
     Log = true,
+    -- Jarak maksimum (studs) untuk dianggap "sedang trade"
+    TradeDistance = 40,
+    -- Interval cek loop (detik)
+    LoopInterval = 0.4,
 }
 
 ------------------------------------------------------------
--- Notif GUI (screen-space, selalu di atas PlayerGui)
+-- Services
 ------------------------------------------------------------
-local Players = game:GetService("Players")
+local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInput = game:GetService("UserInputService")
+local UserInputService  = game:GetService("UserInputService")
+local HttpService       = game:GetService("HttpService")
+local RunService        = game:GetService("RunService")
+
 local localPlayer = Players.LocalPlayer
 
 local function log(msg)
@@ -36,14 +47,17 @@ local function warn(msg)
     print("[FishIt-TradeOnly][WARN] " .. tostring(msg))
 end
 
+------------------------------------------------------------
+-- Notif GUI (screen-space, di atas PlayerGui, selalu terlihat)
+------------------------------------------------------------
 local function notify(msg, kind)
     kind = kind or "info"
     local pg = localPlayer:WaitForChild("PlayerGui")
 
     local colors = {
         success = Color3.fromRGB(22, 84, 54),
-        error = Color3.fromRGB(46, 24, 30),
-        info = Color3.fromRGB(24, 24, 36),
+        error   = Color3.fromRGB(46, 24, 30),
+        info    = Color3.fromRGB(24, 24, 36),
     }
 
     local frame = Instance.new("Frame")
@@ -131,7 +145,41 @@ local function scanTradeRemotes()
 end
 
 ------------------------------------------------------------
--- Trade counter
+-- Hook remote: capture payload asli (bikin replikasi sama)
+------------------------------------------------------------
+local callLog = {}
+
+local function hookRemote(remote, tag)
+    if not remote then return end
+    if remote:IsA("RemoteFunction") then
+        local originalCall = remote.Call
+        remote.Call = function(self, ...)
+            local args = table.pack(...)
+            table.insert(callLog, { tag = tag, args = args, time = os.clock() })
+            log(string.format("%s -> %s", tag, table.concat({ args }, " ")))
+            return originalCall(self, ...)
+        end
+    elseif remote:IsA("RemoteEvent") then
+        local originalFire = remote.FireServer
+        remote.FireServer = function(self, ...)
+            local args = table.pack(...)
+            table.insert(callLog, { tag = tag, args = args, time = os.clock() })
+            log(string.format("%s -> %s", tag, table.concat({ args }, " ")))
+            return originalFire(self, ...)
+        end
+        -- Observe incoming calls (server -> client)
+        local originalOnClient = remote.OnClientEvent
+        if not originalOnClient then
+            remote.OnClientEvent = function(...)
+                local args = table.pack(...)
+                table.insert(callLog, { tag = tag .. ":in", args = args, time = os.clock() })
+            end
+        end
+    end
+end
+
+------------------------------------------------------------
+-- Trade counterpart
 ------------------------------------------------------------
 local function getTradeCounterpart()
     local localChar = localPlayer.Character
@@ -152,9 +200,40 @@ local function getTradeCounterpart()
 end
 
 ------------------------------------------------------------
+-- Klik GUI (mirror klik asli pemain — lebih aman dari
+-- re-fire remote kalau validasi server-side ada)
+------------------------------------------------------------
+local function clickGuiButton(guiRoot, buttonName)
+    local btn = guiRoot:FindFirstChild(buttonName)
+    if not btn then
+        for _, d in ipairs(guiRoot:GetDescendants()) do
+            if d.Name:lower() == buttonName:lower() and d:IsA("TextButton") then
+                btn = d
+                break
+            end
+        end
+    end
+    if btn and btn:IsA("TextButton") then
+        btn.MouseButton1Click:Fire()
+        log("Clicked GUI button: " .. buttonName)
+        return true
+    end
+    warn("GUI button not found: " .. buttonName)
+    return false
+end
+
+------------------------------------------------------------
 -- Mode
 ------------------------------------------------------------
 local tradeModeActive = false
+local inWhitelist = {}
+
+local function markWhitelisted(playerName)
+    if not inWhitelist[playerName] then
+        inWhitelist[playerName] = true
+        log("Whitelisted: " .. playerName)
+    end
+end
 
 local function toggleTradeMode()
     tradeModeActive = not tradeModeActive
@@ -167,20 +246,46 @@ end
 
 local function autoTradeLoop()
     while true do
-        task.wait(0.5)
+        task.wait(KONFIG.LoopInterval)
         if not tradeModeActive then continue end
 
         local counterpart, dist = getTradeCounterpart()
-        if not counterpart or dist > 50 then continue end
+        if not counterpart or dist > KONFIG.TradeDistance then continue end
 
+        -- Target bukan player (NPC/robot)
         if not counterpart.Character or not counterpart.Character:FindFirstChild("Humanoid") then
             if KONFIG.AutoDeclineNPC then
-                warn("Non-player target: " .. counterpart.Name)
+                warn("Declining non-player target: " .. counterpart.Name)
+                clickGuiButton(localPlayer:FindFirstChild("PlayerGui"), "Decline")
             end
             continue
         end
 
-        if KONFIG.PlayerOnly then
+        if not KONFIG.PlayerOnly then continue end
+
+        -- Kalau counterparty ada di whitelist (riwayat accept), auto-accept
+        if KONFIG.AutoAcceptWhitelist and inWhitelist[counterpart.Name] then
+            log("Auto-accepting trade with: " .. counterpart.Name)
+            -- 1) Coba klik GUI button "Accept" (paling aman, mirror klik asli)
+            local pg = localPlayer:FindFirstChild("PlayerGui")
+            if pg then
+                local ok = clickGuiButton(pg, "Accept")
+                if ok then
+                    log("GUI Accept clicked for " .. counterpart.Name)
+                end
+            end
+            -- 2) Fallback: fire remote TradeAccept langsung
+            local acceptRemote = remoteCache["TradeAccept"] or remoteCache["Trade"]
+            if acceptRemote then
+                pcall(function()
+                    if acceptRemote:IsA("RemoteFunction") then
+                        acceptRemote:InvokeServer()
+                    else
+                        acceptRemote:FireServer()
+                    end
+                end)
+            end
+        else
             log(string.format("Near player: %s (%.1f studs)", counterpart.Name, dist))
         end
     end
@@ -209,12 +314,16 @@ local function setup()
                     if inst.Name == name then
                         log("Late-bound remote: " .. name)
                         remoteCache[name] = inst
+                        hookRemote(inst, name)
                         notify("Late-bound trade remote found: " .. name, "info")
                     end
                 end
             end
         end)
     else
+        for name, remote in pairs(found) do
+            hookRemote(remote, name)
+        end
         notify(
             string.format("Fish It! trade-only: %d remotes found. Press '%s' to toggle mode.", count, KONFIG.KeyToggle),
             "success"
@@ -222,7 +331,7 @@ local function setup()
         log(string.format("%d trade remotes found.", count))
     end
 
-    UserInput.InputBegan:Connect(function(input, processed)
+    UserInputService.InputBegan:Connect(function(input, processed)
         if processed then return end
         if input.UserInputType == Enum.UserInputType.Keyboard
             and input.KeyCode.Name:upper():sub(1, 1) == KONFIG.KeyToggle:upper()
