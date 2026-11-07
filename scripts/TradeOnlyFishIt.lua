@@ -86,8 +86,14 @@ local function notify(msg, kind)
     label.TextYAlignment = Enum.TextYAlignment.Center
     label.TextWrapped = true
     label.TextColor3 = Color3.new(1, 1, 1)
-    label.Padding = Dimension.new(12, 2)
     label.Parent = frame
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 12)
+    padding.PaddingRight = UDim.new(0, 12)
+    padding.PaddingTop = UDim.new(0, 2)
+    padding.PaddingBottom = UDim.new(0, 2)
+    padding.Parent = label
 
     frame.Parent = pg
 
@@ -98,7 +104,7 @@ local function notify(msg, kind)
             local t = 0
             local duration = 0.4
             while t < duration and frame.Parent do
-                t += 0.02
+                t = t + 0.02
                 frame.BackgroundTransparency = math.min(1, t / duration)
                 task.wait()
             end
@@ -250,46 +256,44 @@ end
 local function autoTradeLoop()
     while true do
         task.wait(KONFIG.LoopInterval)
-        if not tradeModeActive then continue end
+        if tradeModeActive then
+            local counterpart, dist = getTradeCounterpart()
 
-        local counterpart, dist = getTradeCounterpart()
-        if not counterpart or dist > KONFIG.TradeDistance then continue end
-
-        -- Target bukan player (NPC/robot)
-        if not counterpart.Character or not counterpart.Character:FindFirstChild("Humanoid") then
-            if KONFIG.AutoDeclineNPC then
-                warn("Declining non-player target: " .. counterpart.Name)
-                clickGuiButton(localPlayer:FindFirstChild("PlayerGui"), "Decline")
-            end
-            continue
-        end
-
-        if not KONFIG.PlayerOnly then continue end
-
-        -- Kalau counterparty ada di whitelist (riwayat accept), auto-accept
-        if KONFIG.AutoAcceptWhitelist and inWhitelist[counterpart.Name] then
-            log("Auto-accepting trade with: " .. counterpart.Name)
-            -- 1) Coba klik GUI button "Accept" (paling aman, mirror klik asli)
-            local pg = localPlayer:FindFirstChild("PlayerGui")
-            if pg then
-                local ok = clickGuiButton(pg, "Accept")
-                if ok then
-                    log("GUI Accept clicked for " .. counterpart.Name)
+            if counterpart and dist <= KONFIG.TradeDistance then
+                -- Target bukan player (NPC/robot)
+                if not counterpart.Character or not counterpart.Character:FindFirstChild("Humanoid") then
+                    if KONFIG.AutoDeclineNPC then
+                        warn("Declining non-player target: " .. counterpart.Name)
+                        clickGuiButton(localPlayer:FindFirstChild("PlayerGui"), "Decline")
+                    end
+                elseif KONFIG.PlayerOnly then
+                    -- Kalau counterparty ada di whitelist (riwayat accept), auto-accept
+                    if KONFIG.AutoAcceptWhitelist and inWhitelist[counterpart.Name] then
+                        log("Auto-accepting trade with: " .. counterpart.Name)
+                        -- 1) Coba klik GUI button "Accept" (paling aman, mirror klik asli)
+                        local pg = localPlayer:FindFirstChild("PlayerGui")
+                        if pg then
+                            local ok = clickGuiButton(pg, "Accept")
+                            if ok then
+                                log("GUI Accept clicked for " .. counterpart.Name)
+                            end
+                        end
+                        -- 2) Fallback: fire remote TradeAccept langsung
+                        local acceptRemote = remoteCache["TradeAccept"] or remoteCache["Trade"]
+                        if acceptRemote then
+                            pcall(function()
+                                if acceptRemote:IsA("RemoteFunction") then
+                                    acceptRemote:InvokeServer()
+                                else
+                                    acceptRemote:FireServer()
+                                end
+                            end)
+                        end
+                    else
+                        log(string.format("Near player: %s (%.1f studs)", counterpart.Name, dist))
+                    end
                 end
             end
-            -- 2) Fallback: fire remote TradeAccept langsung
-            local acceptRemote = remoteCache["TradeAccept"] or remoteCache["Trade"]
-            if acceptRemote then
-                pcall(function()
-                    if acceptRemote:IsA("RemoteFunction") then
-                        acceptRemote:InvokeServer()
-                    else
-                        acceptRemote:FireServer()
-                    end
-                end)
-            end
-        else
-            log(string.format("Near player: %s (%.1f studs)", counterpart.Name, dist))
         end
     end
 end
@@ -301,7 +305,7 @@ local function setup()
     log("Scanning for trade remotes...")
     local found = scanTradeRemotes()
     local count = 0
-    for _ in pairs(found) do count += 1 end
+    for _ in pairs(found) do count = count + 1 end
 
     if count == 0 then
         notify(

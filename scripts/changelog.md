@@ -5,6 +5,25 @@ Catat setiap perubahan file di folder `scripts/`. Newest di atas.
 
 ## `TradeOnlyFishIt.lua`
 
+### Fix #7 — Bug runtime: `Dimension.new`, `+=`, `continue` (ini penyebab "ga on")
+| | |
+|---|---|
+| **Tanggal** | 2026-11-07 |
+| **File** | `scripts/TradeOnlyFishIt.lua` |
+| **Masalah** | Script di-inject tapi tidak ada notifikasi ON/OFF sama sekali; di-eval tanpa error yang kelihatan |
+| **Akar** | Tiga bug nyata di kode versi Fix #6: |
+| **1** | Baris 89 `label.Padding = Dimension.new(12, 2)` — `Dimension` **bukan class Roblox**, dan `TextLabel` tak punya properti `Padding`. Crash tepat di dalam `notify()`, jadi notifikasi pertama (yang seharusnya jadi bukti script jalan) malah membunuh script |
+| **2** | Baris 101 `t += 0.02` — operator `+=` hanya Luau/compound assignment. Di path fade animasi |
+| **3** | Empat `continue` di `autoTradeLoop()` (`continue` = ekstensi Luau, bukan Lua 5.4) |
+| **Perubahan** | |
+| **1** | `Dimension.new` → `Instance.new("UIPadding")` + `UDim.new` untuk Left/Right/Top/Bottom, di-parent ke label |
+| **2** | `t += 0.02` → `t = t + 0.02` (dan `count += 1` → `count = count + 1`, sama-sama gak konsisten) |
+| **3** | `autoTradeLoop()` ditulis ulang tanpa `continue`: `if tradeModeActive then ... end` + `if/elseif` bersarang. Perilaku sama, tapi tak mungkin ada variabel yang undefined |
+| **4** | Tambah harness `/tmp/opencode/roblox_harness.lua` — stub `Instance`/`Enum`/`UDim2`/`Color3`/`task` yang melaporkan properti ilegal sebagai error |
+| **Verifikasi** | `luac5.4 -p TradeOnlyFishIt.lua` → **SYNTAX OK**. Harness: **Total masalah: 0**, log `3 trade remotes found` + `Trade-only mode: ON` (setelah toggle key T diuji lewat `InputBegan`) |
+| **Pelajaran** | `luac -p` cuma nangkap sintaks Lua; `Dimension.new` lolos karena valid secara sintaks. Yang nangkap typo Instance adalah harness stub. Selalu jalanin keduanya sebelum minta user test |
+| **Deploy** | Autoexecute + Salinan di `/sdcard/Delta/Scripts/RobloxDebug/` disinkronkan ke md5 `f0fd208a5a3314428bd21827dee1abb0` |
+
 ### Fix #6 — Ganti loadstring ke HttpService:GetHttpAsset + update Delta Autoexecute
 | | |
 |---|---|
