@@ -2,11 +2,15 @@
 -- Fish It! Trade-Only (Delta-friendly, dengan notifikasi)
 --
 -- Pakai lewat Delta:
---   local HttpService = game:GetService("HttpService")
---   local src = HttpService:GetHttpAsset("https://raw.githubusercontent.com/yasgudman/mahal/main/scripts/TradeOnlyFishIt.lua")
+--   local Http = game:GetService("HttpService")
+--   local src  = Http:GetHttpAsset("https://raw.githubusercontent.com/yasgudman/mahal/main/scripts/TradeOnlyFishIt.lua")
 --   loadstring(src)()
 --
--- (game:HttpGet juga boleh — HttpService:GetHttpAsset lebih Roblox-native)
+-- Catatan:
+--   - Http:GetHttpAsset = HttpService (Roblox-native, bisa di-cache client)
+--   - Kalau GetHttpAsset error (game tanpa HTTP permission),
+--     pakai game:HttpGet:
+--     loadstring(game:HttpGet("https://raw.githubusercontent.com/yasgudman/mahal/main/scripts/TradeOnlyFishIt.lua"))()
 --
 -- Setelah di-loadstring:
 --   - Notif "trade-only ON/OFF" muncul di layar tiap toggle
@@ -32,7 +36,6 @@ local KONFIG = {
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService  = game:GetService("UserInputService")
-local HttpService       = game:GetService("HttpService")
 local RunService        = game:GetService("RunService")
 
 local localPlayer = Players.LocalPlayer
